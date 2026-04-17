@@ -8,226 +8,113 @@
 <title>Fog Mirror</title>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
+html, body { width:100%; height:100%; background:#000; overflow:hidden; font-family:Georgia,serif; color:#fff; }
 
-html, body {
-  width:100%; height:100%;
-  background:#000;
-  overflow:hidden;
-  /* NO touch-action:none here — that blocks the keyboard on iOS */
-  font-family: Georgia, serif;
-  color:#fff;
-}
+/* Canvas hidden until launched — prevents p5 from eating touch events */
+canvas { display:none; position:fixed; top:0; left:0; touch-action:none; }
+canvas.active { display:block; }
 
-canvas {
-  display:block;
-  position:fixed;
-  top:0; left:0;
-  touch-action:none; /* only the canvas blocks default touch */
+/* Key screen */
+#ks {
+  position:fixed; inset:0; background:#000;
+  display:flex; flex-direction:column;
+  align-items:center; justify-content:center;
+  padding:48px 36px; gap:22px; z-index:50;
 }
+#ks h1 { font-size:17px; font-weight:400; letter-spacing:0.22em; color:rgba(195,187,177,.82); text-align:center; }
+#ks p  { font-size:12px; color:rgba(135,127,117,.65); text-align:center; line-height:2.1; letter-spacing:0.05em; }
+#ks hr { width:100%; border:none; border-top:0.5px solid rgba(255,255,255,.07); }
 
-/* ── KEY SCREEN ─────────────────────────────────────────────── */
-#keyscreen {
-  position:fixed;
-  inset:0;
-  background:#000;
-  display:flex;
-  flex-direction:column;
-  align-items:center;
-  justify-content:center;
-  z-index:200;
-  padding:48px 32px;
-  gap:20px;
-  /* allow touch/scroll inside this div */
-  touch-action:auto;
-  overflow-y:auto;
+#ks input {
+  width:100%; padding:16px; border-radius:12px;
+  background:rgba(255,255,255,.04);
+  border:0.5px solid rgba(255,255,255,.22);
+  color:rgba(210,202,192,.92); font-family:monospace; font-size:14px;
+  text-align:center; outline:none; letter-spacing:0.02em;
+  /* iOS keyboard fix */
+  -webkit-user-select:text; user-select:text;
+  touch-action:manipulation;
 }
+#ks input::placeholder { color:rgba(140,132,122,.35); }
+#ks input:focus { border-color:rgba(255,255,255,.4); }
 
-#keyscreen h1 {
-  font-size:17px;
-  font-weight:400;
-  letter-spacing:0.2em;
-  color:rgba(200,192,182,0.82);
-  text-align:center;
-  margin-bottom:4px;
+#ks .go {
+  width:100%; padding:17px; border-radius:12px;
+  background:rgba(255,255,255,.05); border:0.5px solid rgba(255,255,255,.2);
+  color:rgba(200,192,182,.85); font-family:Georgia,serif; font-size:14px;
+  letter-spacing:0.16em; cursor:pointer; touch-action:manipulation;
 }
+#ks .go:active { background:rgba(255,255,255,.12); }
 
-#keyscreen p {
-  font-size:12px;
-  color:rgba(140,132,122,0.65);
-  text-align:center;
-  line-height:2.0;
-  letter-spacing:0.05em;
+#ks .skip {
+  font-size:11px; color:rgba(105,98,90,.55); letter-spacing:0.1em;
+  text-decoration:underline; text-underline-offset:3px;
+  background:none; border:none; font-family:Georgia,serif;
+  cursor:pointer; padding:4px; touch-action:manipulation;
 }
+#ks .skip:active { color:rgba(150,142,132,.8); }
 
-#keyscreen .divider {
-  width:100%;
-  height:0.5px;
-  background:rgba(255,255,255,0.07);
+/* Experience UI */
+#ui { position:fixed; inset:0; pointer-events:none; z-index:10; display:none; }
+#sub {
+  position:absolute; bottom:8%; left:0; right:0;
+  text-align:center; font-size:15px; letter-spacing:0.04em;
+  color:rgba(192,185,172,0); transition:color .7s; padding:0 28px; line-height:1.6;
 }
-
-#apiinput {
-  width:100%;
-  background:rgba(255,255,255,0.04);
-  border:0.5px solid rgba(255,255,255,0.2);
-  border-radius:12px;
-  color:rgba(210,202,192,0.9);
-  font-family:monospace;
-  font-size:14px;
-  padding:16px 16px;
-  outline:none;
-  letter-spacing:0.03em;
-  text-align:center;
-  /* critical: allow touch & keyboard on iOS */
-  touch-action:auto;
-  -webkit-user-select:text;
-  user-select:text;
+#sub.on { color:rgba(192,185,172,.9); }
+#dot {
+  position:absolute; top:22px; right:20px;
+  width:7px; height:7px; border-radius:50%;
+  background:rgba(100,200,100,0); transition:background .3s;
 }
-#apiinput::placeholder { color:rgba(150,142,132,0.35); letter-spacing:0.02em; }
-#apiinput:focus { border-color:rgba(255,255,255,0.35); }
-
-.btn-main {
-  width:100%;
-  background:rgba(255,255,255,0.05);
-  border:0.5px solid rgba(255,255,255,0.2);
-  border-radius:12px;
-  color:rgba(200,192,182,0.85);
-  font-family:Georgia,serif;
-  font-size:14px;
-  letter-spacing:0.15em;
-  padding:17px 16px;
-  cursor:pointer;
-  -webkit-appearance:none;
-  touch-action:auto;
-}
-.btn-main:active { background:rgba(255,255,255,0.11); }
-
-.btn-skip {
-  font-size:11px;
-  color:rgba(110,104,96,0.55);
-  letter-spacing:0.1em;
-  cursor:pointer;
-  text-decoration:underline;
-  text-underline-offset:3px;
-  background:none;
-  border:none;
-  padding:6px 0;
-  font-family:Georgia,serif;
-  -webkit-appearance:none;
-  touch-action:auto;
-}
-.btn-skip:active { color:rgba(160,152,142,0.8); }
-
-/* ── EXPERIENCE UI ──────────────────────────────────────────── */
-#ui {
-  position:fixed;
-  inset:0;
-  pointer-events:none;
-  z-index:10;
-  display:none;
-}
-
-#subtitle {
-  position:absolute;
-  bottom:8%;
-  left:0; right:0;
-  text-align:center;
-  font-size:15px;
-  color:rgba(192,185,172,0);
-  transition:color 0.7s ease;
-  padding:0 28px;
-  line-height:1.6;
-  letter-spacing:0.04em;
-}
-#subtitle.show { color:rgba(192,185,172,0.90); }
-
-#listendot {
-  position:absolute;
-  top:22px; right:20px;
-  width:7px; height:7px;
-  border-radius:50%;
-  background:rgba(100,200,100,0);
-  transition:background 0.3s;
-}
-#listendot.on { background:rgba(100,200,100,0.80); }
+#dot.on { background:rgba(100,200,100,.8); }
 </style>
 </head>
 <body>
 
-<!-- ── API KEY SCREEN ─────────────────────────────────────── -->
-<div id="keyscreen">
+<div id="ks">
   <h1>fog mirror</h1>
-  <p>
-    a communication from the third realm<br>
-    enter your anthropic api key<br>
-    to speak with what is inside
-  </p>
-  <div class="divider"></div>
-  <input
-    id="apiinput"
-    type="text"
-    inputmode="text"
-    placeholder="sk-ant-..."
-    autocomplete="off"
-    autocorrect="off"
-    autocapitalize="none"
-    spellcheck="false"
-  />
-  <button class="btn-main" id="enterBtn">enter the glass</button>
-  <button class="btn-skip" id="skipBtn">continue without key — demo mode</button>
+  <p>a communication from the third realm<br>enter your anthropic api key<br>to speak with what is inside</p>
+  <hr>
+  <input id="ki" type="text" inputmode="text" placeholder="sk-ant-..."
+         autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false">
+  <button class="go" id="gb">enter the glass</button>
+  <button class="skip" id="sb">continue without key — demo mode</button>
 </div>
 
-<!-- ── EXPERIENCE OVERLAY ────────────────────────────────── -->
 <div id="ui">
-  <div id="subtitle"></div>
-  <div id="listendot"></div>
+  <div id="sub"></div>
+  <div id="dot"></div>
 </div>
 
-<!-- Libraries -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/addons/p5.sound.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@0.8/dist/teachablemachine-image.min.js"></script>
 <script src="sketch.js"></script>
 
 <script>
-// Block scroll/zoom ONLY after launch (not on key screen)
-let scrollBlocked = false;
-document.addEventListener('touchmove', e => {
-  if (scrollBlocked) e.preventDefault();
-}, { passive: false });
-
-// ── Launch ──────────────────────────────────────────────────
 function launch(key) {
-  window._apiKey = (key || '').trim();
-  document.getElementById('keyscreen').style.display = 'none';
+  window._apiKey = (key||'').trim();
+  // Show canvas, hide key screen, show UI
+  document.querySelector('canvas').classList.add('active');
+  document.getElementById('ks').style.display = 'none';
   document.getElementById('ui').style.display = 'block';
-  scrollBlocked = true; // now block scroll on the canvas experience
+  // Now block touchmove (scroll) since we're in the canvas experience
+  document.addEventListener('touchmove', e=>e.preventDefault(), {passive:false});
   if (window._launchExperience) window._launchExperience();
 }
 
-document.getElementById('enterBtn').addEventListener('click', () => {
-  launch(document.getElementById('apiinput').value);
-});
-document.getElementById('skipBtn').addEventListener('click', () => {
-  launch('');
-});
-document.getElementById('apiinput').addEventListener('keydown', e => {
-  if (e.key === 'Enter') launch(document.getElementById('apiinput').value);
-});
+document.getElementById('gb').addEventListener('click', ()=> launch(document.getElementById('ki').value));
+document.getElementById('sb').addEventListener('click', ()=> launch(''));
+document.getElementById('ki').addEventListener('keydown', e=>{ if(e.key==='Enter') launch(document.getElementById('ki').value); });
 
-// ── UI helpers called from sketch.js ───────────────────────
-window.showSubtitle = function(text) {
-  const el = document.getElementById('subtitle');
-  el.classList.remove('show');
-  void el.offsetWidth; // force reflow to restart transition
-  el.textContent = text;
-  el.classList.add('show');
+window.showSubtitle = t => {
+  const el=document.getElementById('sub');
+  el.classList.remove('on'); void el.offsetWidth;
+  el.textContent=t; el.classList.add('on');
 };
-window.hideSubtitle = function() {
-  document.getElementById('subtitle').classList.remove('show');
-};
-window.setListenDot = function(on) {
-  document.getElementById('listendot').classList.toggle('on', on);
-};
+window.hideSubtitle = ()=> document.getElementById('sub').classList.remove('on');
+window.setListenDot = on => document.getElementById('dot').classList.toggle('on',on);
 </script>
 </body>
 </html>
