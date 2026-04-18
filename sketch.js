@@ -5,10 +5,12 @@
 let imgRoom, imgWater, imgGirl, imgGirlWave;
 let imgWaveF, imgWaveL, imgWaveR;
 
-// FOG — grid of plain rects. cellW=width/FC, cellH=height/FR.
-// Fills screen exactly. No buffer. No drawImage. Cannot tile.
+// FOG — grid of plain rects
 const FC=40, FR=71;
 let fogMap, cellW, cellH;
+
+// Water droplets that form after wiping
+let drops = []; // [{x,y,len,speed,alpha,width}]
 
 // Parallax
 let tiltX=0,tiltY=0,smX=0,smY=0;
@@ -20,7 +22,7 @@ let pAX=0,pAY=0,pAZ=0;
 // Girl
 let girlWaving=false,bPhase=0,bY=0;
 
-// TM gesture
+// TM
 const TM_URL='https://teachablemachine.withgoogle.com/models/3coy75KsA/';
 let tmModel=null,tmCam=null,tmReady=false,tmLastT=0;
 let waveHold=0,coverHold=0;
@@ -48,7 +50,7 @@ const IDLE=[
 let fc=0,hintA=220;
 let px=-1,py=-1;
 
-// ── cover-scale helper ───────────────────────────────────────
+// ── cover-scale ──────────────────────────────────────────────
 function drawCover(img,cx,cy,sc,alpha){
   if(!img||!img.width) return;
   const s=max(width/img.width,height/img.height)*(sc||1);
@@ -78,23 +80,18 @@ function setup(){
   imageMode(CENTER);
   noStroke();
   fogMap=new Float32Array(FC*FR).fill(1.0);
-
   mic=new p5.AudioIn(); mic.start();
   fft=new p5.FFT(0.8,64); fft.setInput(mic);
-
   window.addEventListener('deviceorientation',onOrientation);
   window.addEventListener('devicemotion',onMotion);
 }
 
 // ================================================================
-//  LAUNCH
+//  LAUNCH — called from experience.html on first touch
 // ================================================================
 window._launchExperience=async function(){
-  // iOS sensor permissions (must be in user-gesture chain)
   try{ if(DeviceMotionEvent?.requestPermission) await DeviceMotionEvent.requestPermission(); }catch(e){}
   try{ if(DeviceOrientationEvent?.requestPermission) await DeviceOrientationEvent.requestPermission(); }catch(e){}
-
-  // Audio
   try{
     if(typeof userStartAudio==='function') await userStartAudio();
     aCtx=new(window.AudioContext||window.webkitAudioContext)();
@@ -102,7 +99,6 @@ window._launchExperience=async function(){
     ambGain.connect(aCtx.destination);
     buildAmbient(); audioOn=true;
   }catch(e){}
-
   initSpeech();
   initTM();
   idleAt=millis()+18000;
@@ -288,22 +284,14 @@ async function sendToAI(msg){
 
 function speakLine(text){
   isSpeaking=true;
-
-  // Show full text in subtitle (with any ellipsis)
   window.showSubtitle&&window.showSubtitle(text);
   const dur=max(3000,text.length*90);
   setTimeout(()=>window.hideSubtitle&&window.hideSubtitle(),dur);
-
   if(!window.speechSynthesis){ isSpeaking=false; setTimeout(startListen,1500); return; }
   window.speechSynthesis.cancel();
 
-  // Strip ALL dots/ellipsis before speaking so TTS never says "dot"
-  let spoken=text
-    .replace(/\.{2,}/g,' ')   // remove ellipsis
-    .replace(/\./g,' ')        // remove full stops (she pauses naturally at commas)
-    .replace(/\s+/g,' ')
-    .trim();
-
+  // Strip dots/ellipsis so TTS never says "dot"
+  let spoken=text.replace(/\.{2,}/g,', ').replace(/\./g,' ').replace(/\s+/g,' ').trim();
   if(!spoken){ isSpeaking=false; setTimeout(startListen,1500); return; }
 
   setTimeout(()=>{
@@ -325,9 +313,10 @@ function checkIdle(){
 }
 
 // ================================================================
-//  FOG — plain rects, no buffer, no drawImage, no noise()
+//  FOG
 // ================================================================
-const REGEN=0.00042;
+// Faster regen: 0.0018 (was 0.00042 — now ~4x faster)
+const REGEN=0.0018;
 
 function clearFogAt(px,py,radiusPx){
   const cx=(px/width)*FC, cy=(py/height)*FR;
@@ -338,6 +327,8 @@ function clearFogAt(px,py,radiusPx){
     const d2=(x-cx)*(x-cx)+(y-cy)*(y-cy);
     if(d2<fr2) fogMap[y*FC+x]=max(0,fogMap[y*FC+x]-(1-d2/fr2)*0.97);
   }
+  // Spawn water droplets at wipe location
+  spawnDrops(px,py);
 }
 function clearFogBottom(intensity){
   const y0=floor(FR*0.78);
@@ -346,7 +337,7 @@ function clearFogBottom(intensity){
 }
 function clearFogCenter(r){ clearFogAt(width/2,height/2,r); }
 function regenFog(){
-  const boost=coverHold>=COVER_NEED?0.005:0;
+  const boost=coverHold>=COVER_NEED?0.008:0;
   for(let i=0;i<fogMap.length;i++) fogMap[i]=min(1,fogMap[i]+REGEN+boost);
 }
 
@@ -357,13 +348,69 @@ function drawFog(){
     for(let x=0;x<FC;x++){
       const v=fogMap[y*FC+x];
       if(v<0.01) continue;
-      // Colour: cool milky grey. Slow drift via sin — no noise() call.
       const drift=(sin(fc*0.003+x*0.08+y*0.08)*0.5+0.5)*20;
       const c=170+drift;
       fill(c,c+8,c+20,v*252);
       rect(x*cellW,y*cellH,cellW+1,cellH+1);
     }
   }
+}
+
+// ================================================================
+//  WATER DROPLETS — spawn on wipe, slide down the glass
+// ================================================================
+function spawnDrops(sx, sy) {
+  // Spawn 2-4 droplets near the wipe position
+  const count = floor(random(2,5));
+  for (let i=0; i<count; i++) {
+    drops.push({
+      x:     sx + random(-30, 30),
+      y:     sy + random(-10, 10),
+      len:   random(8, 35),        // trail length px
+      speed: random(0.4, 1.8),     // px per frame
+      alpha: random(120, 200),
+      w:     random(1.0, 2.5),     // stroke width
+      wobble: random(TWO_PI),      // phase for slight sideways drift
+    });
+  }
+  // Cap total drops
+  if (drops.length > 80) drops = drops.slice(-80);
+}
+
+function updateAndDrawDrops() {
+  push();
+  noFill();
+  for (let i = drops.length-1; i >= 0; i--) {
+    const d = drops[i];
+    d.y    += d.speed;
+    d.alpha -= 0.8;           // fade out
+    d.x    += sin(d.wobble + fc*0.04) * 0.15; // subtle sideways drift
+
+    if (d.alpha <= 0 || d.y > height + 40) {
+      drops.splice(i, 1);
+      continue;
+    }
+
+    // Check fog density at drop position — only draw where fog exists
+    const fogVal = fogMap[
+      min(FR-1, floor((d.y/height)*FR)) * FC +
+      min(FC-1, floor((d.x/width)*FC))
+    ] || 0;
+    if (fogVal < 0.05) { drops.splice(i,1); continue; } // fell into clear area
+
+    // Draw: thin vertical line (the streak) + small oval at bottom (the bead)
+    const streakAlpha = d.alpha * fogVal;
+    stroke(220, 226, 235, streakAlpha * 0.55);
+    strokeWeight(d.w * 0.6);
+    line(d.x, d.y - d.len, d.x, d.y);
+
+    // Bead at bottom
+    fill(225, 230, 240, streakAlpha * 0.8);
+    noStroke();
+    ellipse(d.x, d.y, d.w*2.2, d.w*2.8);
+    noFill();
+  }
+  pop();
 }
 
 // ================================================================
@@ -424,17 +471,20 @@ function draw(){
   drawingContext.fillStyle=vg;
   drawingContext.fillRect(0,0,width,height);
 
-  // 5. FOG — rects, fills screen, single layer
+  // 5. FOG
   drawFog();
 
-  // 6. COVER THICKEN
+  // 6. DROPLETS — drawn on top of fog so they appear on the glass
+  updateAndDrawDrops();
+
+  // 7. COVER
   if(coverHold>=COVER_NEED){
     const ca=map(coverHold,COVER_NEED,COVER_NEED+80,0,130);
     fill(178,184,196,constrain(ca,0,130));
     rect(0,0,width,height);
   }
 
-  // 7. SPLASH
+  // 8. SPLASH
   if(splashA>4){
     push(); blendMode(SCREEN);
     const wi=shakeDir==='left'?imgWaveL:shakeDir==='right'?imgWaveR:imgWaveF;
@@ -442,7 +492,7 @@ function draw(){
     pop();
   }
 
-  // 8. HINT
+  // 9. HINT
   if(hintA>0){
     if(fc>160) hintA=max(0,hintA-2);
     push();
@@ -471,7 +521,6 @@ function mouseDragged(){
   for(let i=0;i<=n;i++) clearFogAt(lerp(px,mouseX,i/n),lerp(py,mouseY,i/n),r);
   px=mouseX; py=mouseY;
 }
-
 function windowResized(){
   resizeCanvas(windowWidth,windowHeight);
   fogMap=new Float32Array(FC*FR).fill(1.0);
